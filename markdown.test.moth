@@ -1,0 +1,170 @@
+# markdown.moth's tests: moth test markdown.test.moth
+
+use "markdown.moth" as md
+
+to html with words
+    return md's to_html(words)
+end
+
+to test_headings
+    expect html("# Notes") is "<h1 id=\"notes\">Notes</h1>\n"
+    expect html("###### six") is "<h6 id=\"six\">six</h6>\n"
+    expect html("####### seven") is "<p>####### seven</p>\n"
+    expect html("#no space") is "<p>#no space</p>\n"
+    expect html("## Closed ##") is "<h2 id=\"closed\">Closed</h2>\n"
+    expect html("# C# rocks") is "<h1 id=\"c-rocks\">C# rocks</h1>\n"
+    expect html("Title\n=====") is "<h1 id=\"title\">Title</h1>\n"
+    expect html("Sub\n---") is "<h2 id=\"sub\">Sub</h2>\n"
+    expect html("Two\nlines\n===") is "<h1 id=\"two-lines\">Two\nlines</h1>\n"
+    expect html("# Getting *started*\n# Getting started") is "<h1 id=\"getting-started\">Getting <em>started</em></h1>\n<h1 id=\"getting-started-1\">Getting started</h1>\n"
+    expect html("# What's new? Größe!") is "<h1 id=\"whats-new-größe\">What's new? Größe!</h1>\n"
+end
+
+to test_paragraphs_and_breaks
+    expect html("one\ntwo\n\nthree") is "<p>one\ntwo</p>\n<p>three</p>\n"
+    expect html("   spaces before") is "<p>spaces before</p>\n"
+    expect html("hard  \nbreak") is "<p>hard<br />\nbreak</p>\n"
+    expect html("hard\\\nbreak") is "<p>hard<br />\nbreak</p>\n"
+    expect html("soft \nbreak  ") is "<p>soft\nbreak</p>\n"
+    expect html("") is ""
+    expect html("\n\n  \n") is ""
+    set cr to md's markdown_cr()
+    expect html("windows" + cr + "\nlines" + cr + "\n") is "<p>windows\nlines</p>\n"
+    expect html("```\n\tx\n```") is "<pre><code>    x\n</code></pre>\n" # a tab is spaces to the next stop of 4
+end
+
+to test_emphasis
+    expect md's inline_html("*em* _em_ **strong** __strong__") is "<em>em</em> <em>em</em> <strong>strong</strong> <strong>strong</strong>"
+    expect md's inline_html("***both***") is "<em><strong>both</strong></em>"
+    expect md's inline_html("*a **b** c*") is "<em>a <strong>b</strong> c</em>"
+    expect md's inline_html("**a *b* c**") is "<strong>a <em>b</em> c</strong>"
+    expect md's inline_html("snake_case_name") is "snake_case_name"
+    expect md's inline_html("2*3*4") is "2<em>3</em>4"
+    expect md's inline_html("a * b * c") is "a * b * c"
+    expect md's inline_html("*not closed") is "*not closed"
+    expect md's inline_html("**unbalanced*") is "*<em>unbalanced</em>"
+    expect md's inline_html("~~gone~~ and ~one~") is "<del>gone</del> and <del>one</del>"
+    expect md's inline_html("~~~three~~~") is "~~~three~~~"
+    expect md's inline_html("*a*b*c*") is "<em>a</em>b<em>c</em>"
+    expect md's inline_html("foo*bar*") is "foo<em>bar</em>"
+    expect md's inline_html("foo_bar_") is "foo_bar_"
+end
+
+to test_code
+    expect md's inline_html("`code` and ``a ` b``") is "<code>code</code> and <code>a ` b</code>"
+    expect md's inline_html("` <b> `") is "<code>&lt;b&gt;</code>"
+    expect md's inline_html("`*not em*`") is "<code>*not em*</code>"
+    expect md's inline_html("`unclosed") is "`unclosed"
+    expect html("```moth\nsay \"hi\"\n```") is "<pre><code class=\"language-moth\">say &quot;hi&quot;\n</code></pre>\n"
+    expect html("~~~\na\n\nb\n~~~") is "<pre><code>a\n\nb\n</code></pre>\n"
+    expect html("````\n```\nstill code\n````") is "<pre><code>```\nstill code\n</code></pre>\n"
+    expect html("  ```\n  indented\n    more\n  ```") is "<pre><code>indented\n  more\n</code></pre>\n"
+    expect html("```\nnever closed") is "<pre><code>never closed\n</code></pre>\n"
+    expect html("    code\n      more\n\n    end\n\nafter") is "<pre><code>code\n  more\n\nend\n</code></pre>\n<p>after</p>\n"
+    expect html("para\n    not code") is "<p>para\nnot code</p>\n"
+end
+
+to test_links_and_pictures
+    expect md's inline_html("[Moth](https://example.com/moth)") is "<a href=\"https://example.com/moth\">Moth</a>"
+    expect md's inline_html("[t](/a \"The title\")") is "<a href=\"/a\" title=\"The title\">t</a>"
+    expect md's inline_html("[t](</a b>)") is "<a href=\"/a%20b\">t</a>"
+    expect md's inline_html("[t](/wiki/A_(b))") is "<a href=\"/wiki/A_(b)\">t</a>"
+    expect md's inline_html("[*em* in it](/x)") is "<a href=\"/x\"><em>em</em> in it</a>"
+    expect md's inline_html("![a *cat*](/cat.png \"Cat\")") is "<img src=\"/cat.png\" alt=\"a cat\" title=\"Cat\" />"
+    expect md's inline_html("[not a link] [x](") is "[not a link] [x]("
+    expect md's inline_html("[a](/q?x=1&y=2)") is "<a href=\"/q?x=1&amp;y=2\">a</a>"
+    expect md's inline_html("<https://moth.dev/a?b>") is "<a href=\"https://moth.dev/a?b\">https://moth.dev/a?b</a>"
+    expect md's inline_html("<sam@example.com>") is "<a href=\"mailto:sam@example.com\">sam@example.com</a>"
+    expect md's inline_html("see https://example.com/page.") is "see <a href=\"https://example.com/page\">https://example.com/page</a>."
+    expect md's inline_html("(https://example.com/x)") is "(<a href=\"https://example.com/x\">https://example.com/x</a>)"
+    expect md's inline_html("[https://a.example](https://a.example)") is "<a href=\"https://a.example\">https://a.example</a>"
+end
+
+to test_references
+    set words to "[Moth] and [the language][moth] and [moth][]\n\n[moth]: https://example.com/moth \"Moth\""
+    set link to "<a href=\"https://example.com/moth\" title=\"Moth\">"
+    expect html(words) is "<p>" + link + "Moth</a> and " + link + "the language</a> and " + link + "moth</a></p>\n"
+    expect html("[x]: /only\n\n[x]") is "<p><a href=\"/only\">x</a></p>\n"
+    expect html("[missing] stays") is "<p>[missing] stays</p>\n"
+end
+
+to test_safety
+    expect html("<script>alert(1)</script>") is "<p>&lt;script&gt;alert(1)&lt;/script&gt;</p>\n"
+    expect md's inline_html("a <b>b</b> & c") is "a &lt;b&gt;b&lt;/b&gt; &amp; c"
+    expect md's inline_html("[click](javascript:alert(1))") is "click"
+    expect md's inline_html("[click](JavaScript:alert(1))") is "click"
+    expect md's inline_html("![x](data:text/html,1)") is "x"
+    expect md's inline_html("![dot](data:image/png;base64,AAAA)") is "<img src=\"data:image/png;base64,AAAA\" alt=\"dot\" />"
+    expect md's inline_html("<javascript:alert(1)>") is "javascript:alert(1)"
+    expect md's inline_html("[x](/a\"onmouseover=\"b)") is "<a href=\"/a%22onmouseover=%22b\">x</a>"
+    expect md's to_html_trusted("<div>\n<b>hi</b>\n</div>\n\ntext <i>raw</i> <!-- note -->") is "<div>\n<b>hi</b>\n</div>\n<p>text <i>raw</i> <!-- note --></p>\n"
+end
+
+to test_escapes_and_entities
+    expect md's inline_html("\\*not em\\* \\[x\\] \\\\ \\a") is "*not em* [x] \\ \\a"
+    expect md's inline_html("&copy; &#169; &#xA9; &nope AT&T") is "&copy; &#169; &#xA9; &amp;nope AT&amp;T"
+    expect md's inline_html("\"quoted\" 'single'") is "&quot;quoted&quot; 'single'"
+end
+
+to test_lists
+    expect html("- a\n- b") is "<ul>\n<li>a</li>\n<li>b</li>\n</ul>\n"
+    expect html("* a\n+ b") is "<ul>\n<li>a</li>\n</ul>\n<ul>\n<li>b</li>\n</ul>\n"
+    expect html("1. one\n2. two") is "<ol>\n<li>one</li>\n<li>two</li>\n</ol>\n"
+    expect html("3) three\n4) four") is "<ol start=\"3\">\n<li>three</li>\n<li>four</li>\n</ol>\n"
+    expect html("- a\n  - b\n  - c\n- d") is "<ul>\n<li>a\n<ul>\n<li>b</li>\n<li>c</li>\n</ul>\n</li>\n<li>d</li>\n</ul>\n"
+    expect html("- a\n\n- b") is "<ul>\n<li>\n<p>a</p>\n</li>\n<li>\n<p>b</p>\n</li>\n</ul>\n"
+    expect html("1. one\n\n   more\n2. two") is "<ol>\n<li>\n<p>one</p>\n<p>more</p>\n</li>\n<li>\n<p>two</p>\n</li>\n</ol>\n"
+    expect html("- a\nlazy\n- b") is "<ul>\n<li>a\nlazy</li>\n<li>b</li>\n</ul>\n"
+    expect html("- a\n\nafter") is "<ul>\n<li>a</li>\n</ul>\n<p>after</p>\n"
+    expect html("- ```\n  code\n  ```\n- b") is "<ul>\n<li>\n<pre><code>code\n</code></pre>\n</li>\n<li>b</li>\n</ul>\n"
+    expect html("- > quote") is "<ul>\n<li>\n<blockquote>\n<p>quote</p>\n</blockquote>\n</li>\n</ul>\n"
+    expect html("-\n- x") is "<ul>\n<li></li>\n<li>x</li>\n</ul>\n"
+    expect html("para\n- item") is "<p>para</p>\n<ul>\n<li>item</li>\n</ul>\n"
+    expect html("para\n2. not a list") is "<p>para\n2. not a list</p>\n"
+    expect html("- [ ] todo\n- [x] done\n- [y] neither") is "<ul>\n<li><input type=\"checkbox\" disabled=\"\" /> todo</li>\n<li><input type=\"checkbox\" checked=\"\" disabled=\"\" /> done</li>\n<li>[y] neither</li>\n</ul>\n"
+    expect html("- [x] loose\n\n- [ ] list") is "<ul>\n<li>\n<p><input type=\"checkbox\" checked=\"\" disabled=\"\" /> loose</p>\n</li>\n<li>\n<p><input type=\"checkbox\" disabled=\"\" /> list</p>\n</li>\n</ul>\n"
+end
+
+to test_quotes_and_rules
+    expect html("> a\n> b") is "<blockquote>\n<p>a\nb</p>\n</blockquote>\n"
+    expect html("> a\nlazy") is "<blockquote>\n<p>a\nlazy</p>\n</blockquote>\n"
+    expect html(">>nested") is "<blockquote>\n<blockquote>\n<p>nested</p>\n</blockquote>\n</blockquote>\n"
+    expect html("> # Title\n> - item") is "<blockquote>\n<h1 id=\"title\">Title</h1>\n<ul>\n<li>item</li>\n</ul>\n</blockquote>\n"
+    expect html("---") is "<hr />\n"
+    expect html("* * *") is "<hr />\n"
+    expect html("___") is "<hr />\n"
+    expect html("--") is "<p>--</p>\n"
+    expect html("a\n\n- - -\n\nb") is "<p>a</p>\n<hr />\n<p>b</p>\n"
+end
+
+to test_tables
+    set words to "| Name | Age | Town |\n|:-----|----:|:----:|\n| Ana | 31 | Pune |\n| Bo | 7 |"
+    set made to html(words)
+    expect made is "<table>\n<thead>\n<tr>\n<th align=\"left\">Name</th>\n<th align=\"right\">Age</th>\n<th align=\"center\">Town</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td align=\"left\">Ana</td>\n<td align=\"right\">31</td>\n<td align=\"center\">Pune</td>\n</tr>\n<tr>\n<td align=\"left\">Bo</td>\n<td align=\"right\">7</td>\n<td align=\"center\"></td>\n</tr>\n</tbody>\n</table>\n"
+    expect html("a | b\n--- | ---\n`x \\| y` | *z*") is "<table>\n<thead>\n<tr>\n<th>a</th>\n<th>b</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><code>x | y</code></td>\n<td><em>z</em></td>\n</tr>\n</tbody>\n</table>\n"
+    expect html("| a |\n| - |") is "<table>\n<thead>\n<tr>\n<th>a</th>\n</tr>\n</thead>\n</table>\n"
+    expect html("| a | b |\n| - |") is "<p>| a | b |\n| - |</p>\n"
+    expect html("| a |\n| - |\n| 1 |\n\nafter") is "<table>\n<thead>\n<tr>\n<th>a</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td>1</td>\n</tr>\n</tbody>\n</table>\n<p>after</p>\n"
+end
+
+to test_headings_list
+    set found to md's headings("# Start\n\nText\n\n## Install *it*\n\n> ### Quoted\n\n# Start")
+    expect length of found is 4
+    expect item 1 of found is record with level 1, text "Start", id "start"
+    expect item 2 of found is record with level 2, text "Install it", id "install-it"
+    expect item 3 of found is record with level 3, text "Quoted", id "quoted"
+    expect item 4 of found is record with level 1, text "Start", id "start-1"
+end
+
+to test_a_whole_page
+    set words to "# Moth notes\n\nMoth reads like **plain English**:\n\n```moth\nsay \"Hello\"\n```\n\n- fast\n- small\n\n> Try it."
+    set made to html(words)
+    expect made is "<h1 id=\"moth-notes\">Moth notes</h1>\n<p>Moth reads like <strong>plain English</strong>:</p>\n<pre><code class=\"language-moth\">say &quot;Hello&quot;\n</code></pre>\n<ul>\n<li>fast</li>\n<li>small</li>\n</ul>\n<blockquote>\n<p>Try it.</p>\n</blockquote>\n"
+    # a long one goes quickly
+    set lines to empty list
+    for each k from 1 to 2000
+        add "- item **{k}** with [a link](/page/{k})" to lines
+    end
+    set long to html(join lines with "\n")
+    expect position of "<li>item <strong>2000</strong> with <a href=\"/page/2000\">a link</a></li>" in long is greater than 0
+end

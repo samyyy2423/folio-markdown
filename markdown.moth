@@ -1,0 +1,1720 @@
+# Markdown to HTML, as CommonMark and GitHub write it: headings, paragraphs, emphasis, links and pictures,
+# code, lists (and lists in lists), quotes, tables, task lists, rules and line breaks. In Moth alone, so it
+# works everywhere.
+#
+#   use the package "markdown" as markdown
+#   say markdown's to_html("# Notes\n\nSome *very* **useful** `code`.")
+#   # <h1 id="notes">Notes</h1>
+#   # <p>Some <em>very</em> <strong>useful</strong> <code>code</code>.</p>
+#   set page to markdown's to_html(read "notes.md")
+#   say markdown's inline_html("a [link](https://example.com) and ~~this~~")   # with no <p> around it
+#   for each h in markdown's headings(read "notes.md")       # a table of contents: level, text and id
+#       say "{h's level} {h's text} #{h's id}"
+#   end
+#
+# HTML written in the Markdown is shown as text, not put in the page, so what people type (into a guestbook,
+# say) can't add scripts to it; to_html_trusted(words) lets it through, for Markdown you wrote yourself.
+# Either way, a link or picture to a javascript:, vbscript:, file: or data: address (but data:image/...) is
+# left out, keeping its words.
+#
+# What it reads: # headings (and a line of === or --- under one), paragraphs, *em* and _em_, **strong**,
+# ~~struck~~, `code`, [links](address "title"), [links][name] with [name]: address on a line of its own,
+# <https://...> and bare https:// addresses, ![pictures](address), > quotes, - + * and 1. 1) lists, [ ] and
+# [x] task items, ``` and ~~~ fenced code (with its language), code indented 4 spaces, | tables | with :--:
+# alignments, --- *** ___ rules, \ before a mark for the mark itself, two spaces or a \ at a line's end for
+# a <br />, and &entities;. Each heading gets an id, as GitHub's do, for links to it: "Getting started" is
+# getting-started, and a second one getting-started-1.
+
+# ---------- the whole of it ----------
+
+# the Markdown as HTML
+to to_html with words
+    return markdown_made(words, no)
+end
+
+# the Markdown as HTML, with any HTML in it put in the page as it is
+to to_html_trusted with words
+    return markdown_made(words, yes)
+end
+
+# one line or paragraph of Markdown as HTML, with no <p> around it
+to inline_html with words
+    return markdown_inline(markdown_trimmed("" + words), markdown_state(no))
+end
+
+# the headings, in order: records of their level (1 to 6), text, and id
+to headings with words
+    set state to markdown_state(no)
+    set parsed to markdown_blocks(markdown_lines(words), state)
+    set made to empty list
+    markdown_headings_in(parsed's blocks, state, made)
+    return made
+end
+
+to markdown_headings_in with blocks, state, made
+    for each block in blocks
+        if block's op is "heading"
+            set words to markdown_plain_text(markdown_inline(block's words, state))
+            add (record with level block's level, text words, id markdown_id(words, state)) to made
+        else if block's op is "quote"
+            markdown_headings_in(block's inside, state, made)
+        else if block's op is "list"
+            for each one in block's items
+                markdown_headings_in(one's blocks, state, made)
+            end
+        end
+    end
+end
+
+to markdown_state with trusted
+    return record with trusted trusted, refs empty dictionary, ids empty dictionary, in_link no
+end
+
+to markdown_made with words, trusted
+    set state to markdown_state(trusted)
+    set parsed to markdown_blocks(markdown_lines(words), state)
+    set out to record with pieces empty list, last ""
+    markdown_render(parsed's blocks, state, out, no)
+    return join out's pieces with ""
+end
+
+# the lines, without a Windows line ending's carriage return, with tabs as spaces to the next stop of 4
+to markdown_lines with words
+    set made to empty list
+    set cr to markdown_cr()
+    for each line in split ("" + words) by "\n"
+        set one to line
+        if length of one is greater than 0 and item (length of one) of one is cr
+            set one to markdown_slice(one, 1, length of one - 1)
+        end
+        if position of "\t" in one is greater than 0
+            set one to markdown_untabbed(one)
+        end
+        add one to made
+    end
+    return made
+end
+
+to markdown_untabbed with line
+    set made to empty list
+    set column to 0
+    for each c in line
+        if c is "\t"
+            add " " to made
+            add 1 to column
+            repeat while remainder of column divided by 4 is not 0
+                add " " to made
+                add 1 to column
+            end
+        else
+            add c to made
+            add 1 to column
+        end
+    end
+    return join made with ""
+end
+
+# ---------- blocks ----------
+
+# the blocks the lines make, and whether a blank line came between two of them (which makes a list loose)
+to markdown_blocks with lines, state
+    set blocks to empty list
+    set gaps to no
+    set seen_blank to no
+    set i to 1
+    set n to length of lines
+    repeat while i is at most n
+        if markdown_blank(item i of lines)
+            set seen_blank to yes
+            add 1 to i
+        else
+            if seen_blank and length of blocks is greater than 0
+                set gaps to yes
+            end
+            set seen_blank to no
+            set got to markdown_block(lines, i, state)
+            if got's block is not nothing
+                add got's block to blocks
+            end
+            set i to got's next
+        end
+    end
+    return record with blocks blocks, gaps gaps
+end
+
+# the block that starts at line i, and the line after it
+to markdown_block with lines, i, state
+    set line to item i of lines
+    if markdown_indent(line) is at least 4
+        return markdown_indented_code(lines, i)
+    end
+    set fence to markdown_fence_of(line)
+    if fence is not nothing
+        return markdown_fenced(lines, i, fence)
+    end
+    set heading to markdown_heading_of(line)
+    if heading is not nothing
+        return record with block heading, next i + 1
+    end
+    if markdown_is_rule(line)
+        return record with block (record with op "rule"), next i + 1
+    end
+    if markdown_is_quote(line)
+        return markdown_quote(lines, i, state)
+    end
+    if markdown_marker_of(line) is not nothing
+        return markdown_list(lines, i, state)
+    end
+    if state's trusted and markdown_is_html(line)
+        return markdown_html_block(lines, i)
+    end
+    if markdown_is_table(lines, i)
+        return markdown_table(lines, i)
+    end
+    return markdown_paragraph(lines, i, state)
+end
+
+# whether line j ends a paragraph before it, by starting something else
+to markdown_interrupts with lines, j, state
+    set line to item j of lines
+    if markdown_blank(line)
+        return yes
+    else if markdown_indent(line) is at least 4
+        return no
+    end
+    if markdown_fence_of(line) is not nothing or markdown_heading_of(line) is not nothing
+        return yes
+    else if markdown_is_rule(line) or markdown_is_quote(line)
+        return yes
+    end
+    set marker to markdown_marker_of(line)
+    if marker is not nothing and not marker's no_words and (not marker's ordered or marker's first_number is 1)
+        return yes
+    end
+    if state's trusted and markdown_is_html(line)
+        return yes
+    end
+    return markdown_is_table(lines, j)
+end
+
+to markdown_paragraph with lines, i, state
+    set taken to list of markdown_trimmed_start(item i of lines)
+    set j to i + 1
+    set n to length of lines
+    repeat while j is at most n
+        set line to item j of lines
+        if markdown_blank(line)
+            stop
+        end
+        if markdown_indent(line) is less than 4
+            set level to markdown_underline_of(line)
+            if level is greater than 0
+                set taken to markdown_definitions(taken, state)
+                if length of taken is greater than 0
+                    set words to markdown_trimmed(join taken with "\n")
+                    return record with block (record with op "heading", level level, words words), next j + 1
+                end
+                return markdown_paragraph_or_not(taken, j)
+            end
+        end
+        if markdown_interrupts(lines, j, state)
+            stop
+        end
+        add markdown_trimmed_start(line) to taken
+        add 1 to j
+    end
+    return markdown_paragraph_or_not(markdown_definitions(taken, state), j)
+end
+
+to markdown_paragraph_or_not with taken, next
+    if length of taken is 0
+        return record with block nothing, next next
+    end
+    return record with block (record with op "paragraph", words join taken with "\n", before ""), next next
+end
+
+# 1 for a line of =, 2 for a line of -, under a paragraph; otherwise 0
+to markdown_underline_of with line
+    set body to markdown_trimmed(line)
+    if body is ""
+        return 0
+    end
+    set mark to item 1 of body
+    if mark is not "=" and mark is not "-"
+        return 0
+    end
+    for each c in body
+        if c is not mark
+            return 0
+        end
+    end
+    if mark is "="
+        return 1
+    end
+    return 2
+end
+
+# the paragraph's lines after the link definitions at its start, each kept in the state
+to markdown_definitions with taken, state
+    set k to 1
+    repeat while k is at most length of taken
+        set found to markdown_definition_of(item k of taken)
+        if found is nothing
+            stop
+        end
+        set refs to state's refs
+        set key to markdown_label_key(found's label)
+        if not (key is in refs)
+            set item key of refs to found
+        end
+        add 1 to k
+    end
+    if k is 1
+        return taken
+    end
+    return markdown_items(taken, k, length of taken)
+end
+
+# [name]: address "title", or nothing
+to markdown_definition_of with line
+    if length of line is less than 4 or item 1 of line is not "["
+        return nothing
+    end
+    set close to markdown_bracket_end(line, 1)
+    if close is 0 or close is length of line or item (close + 1) of line is not ":"
+        return nothing
+    end
+    set label to markdown_slice(line, 2, close - 1)
+    if markdown_trimmed(label) is ""
+        return nothing
+    end
+    set rest to markdown_trimmed(markdown_slice(line, close + 2, length of line))
+    if rest is ""
+        return nothing
+    end
+    set address to ""
+    set after to ""
+    if item 1 of rest is "<"
+        set e to position of ">" in rest
+        if e is 0
+            return nothing
+        end
+        set address to markdown_slice(rest, 2, e - 1)
+        set after to markdown_trimmed(markdown_slice(rest, e + 1, length of rest))
+    else
+        set e to position of " " in rest
+        if e is 0
+            set address to rest
+        else
+            set address to markdown_slice(rest, 1, e - 1)
+            set after to markdown_trimmed(markdown_slice(rest, e + 1, length of rest))
+        end
+    end
+    set title to nothing
+    if after is not ""
+        set first to item 1 of after
+        set last to item (length of after) of after
+        if length of after is less than 2
+            return nothing
+        else if not ((first is "\"" and last is "\"") or (first is "'" and last is "'") or (first is "(" and last is ")"))
+            return nothing
+        end
+        set title to markdown_unescaped(markdown_slice(after, 2, length of after - 1))
+    end
+    return record with label label, address markdown_unescaped(address), title title
+end
+
+# a link's name as it's looked up: in lower case, its spaces each one space
+to markdown_label_key with label
+    set made to empty list
+    for each part in split (lowercase of label) by " "
+        for each piece in split part by "\n"
+            if piece is not ""
+                add piece to made
+            end
+        end
+    end
+    return join made with " "
+end
+
+to markdown_indented_code with lines, i
+    set taken to empty list
+    set j to i
+    set last to i
+    set n to length of lines
+    repeat while j is at most n
+        set line to item j of lines
+        if markdown_blank(line)
+            add markdown_unindented(line, 4) to taken
+        else if markdown_indent(line) is at least 4
+            add markdown_unindented(line, 4) to taken
+            set last to j
+        else
+            stop
+        end
+        add 1 to j
+    end
+    set kept to markdown_items(taken, 1, last - i + 1)
+    return record with block (record with op "code", info "", words (join kept with "\n") + "\n"), next last + 1
+end
+
+# ``` or ~~~ (three or more), and what's after it: a record of its mark, size, indent and info, or nothing
+to markdown_fence_of with line
+    set indent to markdown_indent(line)
+    if indent is greater than 3 or indent is length of line
+        return nothing
+    end
+    set mark to item (indent + 1) of line
+    if mark is not "`" and mark is not "~"
+        return nothing
+    end
+    set size to markdown_run(line, indent + 1, mark)
+    if size is less than 3
+        return nothing
+    end
+    set info to markdown_trimmed(markdown_slice(line, indent + size + 1, length of line))
+    if mark is "`" and position of "`" in info is greater than 0
+        return nothing
+    end
+    return record with mark mark, size size, indent indent, info info
+end
+
+to markdown_fenced with lines, i, fence
+    set taken to empty list
+    set j to i + 1
+    set n to length of lines
+    set ended to no
+    repeat while j is at most n and not ended
+        set line to item j of lines
+        if markdown_closes_fence(line, fence)
+            set ended to yes
+        else
+            add markdown_unindented(line, fence's indent) to taken
+        end
+        add 1 to j
+    end
+    set words to join taken with "\n"
+    if length of taken is greater than 0
+        set words to words + "\n"
+    end
+    set info to fence's info
+    set space to position of " " in info
+    if space is greater than 0
+        set info to markdown_slice(info, 1, space - 1)
+    end
+    return record with block (record with op "code", info markdown_unescaped(info), words words), next j
+end
+
+to markdown_closes_fence with line, fence
+    set indent to markdown_indent(line)
+    if indent is greater than 3
+        return no
+    end
+    set body to markdown_trimmed(line)
+    if length of body is less than fence's size
+        return no
+    end
+    for each c in body
+        if c is not fence's mark
+            return no
+        end
+    end
+    return yes
+end
+
+# # to ###### and a space, and the words after them, or nothing
+to markdown_heading_of with line
+    set indent to markdown_indent(line)
+    if indent is greater than 3 or indent is length of line or item (indent + 1) of line is not "#"
+        return nothing
+    end
+    set level to markdown_run(line, indent + 1, "#")
+    if level is greater than 6
+        return nothing
+    end
+    set after to indent + level + 1
+    if after is at most length of line and item after of line is not " "
+        return nothing
+    end
+    set words to markdown_trimmed(markdown_slice(line, after, length of line))
+    # a closing run of #s, after a space
+    if length of words is greater than 0 and item (length of words) of words is "#"
+        set k to length of words
+        repeat while k is at least 1 and item k of words is "#"
+            set k to k - 1
+        end
+        if k is 0
+            set words to ""
+        else if item k of words is " "
+            set words to markdown_trimmed(markdown_slice(words, 1, k))
+        end
+    end
+    return record with op "heading", level level, words words
+end
+
+# three or more *, - or _, with only spaces between
+to markdown_is_rule with line
+    if markdown_indent(line) is greater than 3
+        return no
+    end
+    set mark to ""
+    set count to 0
+    for each c in line
+        if c is not " "
+            if mark is ""
+                if c is not "*" and c is not "-" and c is not "_"
+                    return no
+                end
+                set mark to c
+            else if c is not mark
+                return no
+            end
+            add 1 to count
+        end
+    end
+    return count is at least 3
+end
+
+to markdown_is_quote with line
+    set indent to markdown_indent(line)
+    return indent is at most 3 and indent is less than length of line and item (indent + 1) of line is ">"
+end
+
+to markdown_quote with lines, i, state
+    set taken to empty list
+    set j to i
+    set n to length of lines
+    repeat while j is at most n
+        set line to item j of lines
+        if markdown_is_quote(line)
+            set rest to markdown_slice(line, markdown_indent(line) + 2, length of line)
+            if length of rest is greater than 0 and item 1 of rest is " "
+                set rest to markdown_slice(rest, 2, length of rest)
+            end
+            add rest to taken
+        else if not markdown_blank(line) and length of taken is greater than 0
+            and not markdown_blank(item (length of taken) of taken) and not markdown_interrupts(lines, j, state)
+            # a line of the quote's paragraph, without its >
+            add line to taken
+        else
+            stop
+        end
+        add 1 to j
+    end
+    set inner to markdown_blocks(taken, state)
+    return record with block (record with op "quote", inside inner's blocks), next j
+end
+
+# a list item's marker: - + * or a number and . or ), then a space; or nothing
+to markdown_marker_of with line
+    set indent to markdown_indent(line)
+    if indent is greater than 3 or indent is length of line
+        return nothing
+    end
+    set c to item (indent + 1) of line
+    set ordered to no
+    set first_number to 1
+    set mark to c
+    set size to 1
+    if not (c is "-" or c is "+" or c is "*")
+        set digits to 0
+        repeat while indent + digits + 1 is at most length of line and digits is less than 10
+            and markdown_is_digit(item (indent + digits + 1) of line)
+            add 1 to digits
+        end
+        if digits is 0 or digits is greater than 9 or indent + digits + 1 is greater than length of line
+            return nothing
+        end
+        set mark to item (indent + digits + 1) of line
+        if mark is not "." and mark is not ")"
+            return nothing
+        end
+        set ordered to yes
+        set first_number to number of markdown_slice(line, indent + 1, indent + digits)
+        set size to digits + 1
+    end
+    set after to markdown_slice(line, indent + size + 1, length of line)
+    if markdown_blank(after)
+        return record with ordered ordered, mark mark, first_number first_number, indent indent + size + 1, words "",
+            no_words yes
+    end
+    if item 1 of after is not " "
+        return nothing
+    end
+    set spaces to markdown_indent(after)
+    if spaces is greater than 4
+        set spaces to 1
+    end
+    return record with ordered ordered, mark mark, first_number first_number, indent indent + size + spaces,
+        words markdown_slice(after, spaces + 1, length of after), no_words no
+end
+
+to markdown_list with lines, i, state
+    set first to markdown_marker_of(item i of lines)
+    set items to empty list
+    set loose to no
+    set j to i
+    set last_end to i
+    set n to length of lines
+    repeat while j is at most n
+        set line to item j of lines
+        set marker to markdown_marker_of(line)
+        if marker is nothing or marker's ordered is not first's ordered or marker's mark is not first's mark
+            stop
+        end
+        if markdown_is_rule(line)
+            stop
+        end
+        if length of items is greater than 0 and j is greater than last_end + 1
+            set loose to yes
+        end
+        set from to j
+        set taken to list of marker's words
+        set inside to marker's indent
+        set item_end to j
+        add 1 to j
+        repeat while j is at most n
+            set next_line to item j of lines
+            if markdown_blank(next_line)
+                add "" to taken
+            else if markdown_indent(next_line) is at least inside
+                add markdown_unindented(next_line, inside) to taken
+                set item_end to j
+            else if j is greater than item_end + 1 or markdown_marker_of(next_line) is not nothing
+                stop
+            else if markdown_interrupts(lines, j, state)
+                stop
+            else
+                # a line of the item's paragraph, not indented
+                add markdown_trimmed_start(next_line) to taken
+                set item_end to j
+            end
+            add 1 to j
+        end
+        set taken to markdown_items(taken, 1, item_end - from + 1)
+        set task to nothing
+        set first_line to item 1 of taken
+        if length of first_line is at least 4 and item 1 of first_line is "[" and item 3 of first_line is "]"
+            and item 4 of first_line is " "
+            set ticked to item 2 of first_line
+            if ticked is " "
+                set task to no
+            else if ticked is "x" or ticked is "X"
+                set task to yes
+            end
+            if task is not nothing
+                set item 1 of taken to markdown_slice(first_line, 5, length of first_line)
+            end
+        end
+        set inner to markdown_blocks(taken, state)
+        if inner's gaps
+            set loose to yes
+        end
+        set before to ""
+        if task is yes
+            set before to "<input type=\"checkbox\" checked=\"\" disabled=\"\" /> "
+        else if task is no
+            set before to "<input type=\"checkbox\" disabled=\"\" /> "
+        end
+        set blocks to inner's blocks
+        if before is not "" and length of blocks is greater than 0
+            set first_block to item 1 of blocks
+            if first_block's op is "paragraph"
+                set first_block's before to before
+                set before to ""
+            end
+        end
+        add (record with blocks blocks, before before) to items
+        set last_end to item_end
+        set j to item_end + 1
+        repeat while j is at most n and markdown_blank(item j of lines)
+            add 1 to j
+        end
+    end
+    set block to record with op "list", ordered first's ordered, first_number first's first_number, loose loose,
+        items items
+    return record with block block, next last_end + 1
+end
+
+to markdown_is_html with line
+    set indent to markdown_indent(line)
+    if indent is greater than 3 or indent + 2 is greater than length of line or item (indent + 1) of line is not "<"
+        return no
+    end
+    set c to item (indent + 2) of line
+    return markdown_is_letter(c) or c is "/" or c is "!" or c is "?"
+end
+
+to markdown_html_block with lines, i
+    set taken to empty list
+    set j to i
+    repeat while j is at most length of lines and not markdown_blank(item j of lines)
+        add item j of lines to taken
+        add 1 to j
+    end
+    return record with block (record with op "html", words join taken with "\n"), next j
+end
+
+# a table: a row of headers, then a row of --- with a | in it and as many cells
+to markdown_is_table with lines, i
+    if i is at least length of lines
+        return no
+    end
+    set head to item i of lines
+    set under to item (i + 1) of lines
+    if markdown_indent(head) is greater than 3 or not ("|" is in under)
+        return no
+    end
+    set aligns to markdown_aligns(under)
+    if aligns is nothing
+        return no
+    end
+    return length of markdown_cells(head) is length of aligns
+end
+
+# each column's alignment, from a row such as | :--- | ---: | :-: |, or nothing if it isn't one
+to markdown_aligns with line
+    set made to empty list
+    for each cell in markdown_cells(line)
+        if cell is ""
+            return nothing
+        end
+        set colon_left to item 1 of cell is ":"
+        set colon_right to item (length of cell) of cell is ":"
+        set dashes to 0
+        set k to 1
+        for each c in cell
+            if c is "-"
+                add 1 to dashes
+            else if not (c is ":" and (k is 1 or k is length of cell))
+                return nothing
+            end
+            add 1 to k
+        end
+        if dashes is 0
+            return nothing
+        end
+        if colon_left and colon_right
+            add "center" to made
+        else if colon_left
+            add "left" to made
+        else if colon_right
+            add "right" to made
+        else
+            add "" to made
+        end
+    end
+    return made
+end
+
+# a table row's cells, between its |s (a \| is a | in a cell)
+to markdown_cells with line
+    set body to markdown_trimmed(line)
+    if length of body is greater than 0 and item 1 of body is "|"
+        set body to markdown_slice(body, 2, length of body)
+    end
+    if length of body is greater than 0 and item (length of body) of body is "|"
+        and not (length of body is greater than 1 and item (length of body - 1) of body is "\\")
+        set body to markdown_slice(body, 1, length of body - 1)
+    end
+    set made to empty list
+    set cell to empty list
+    set k to 1
+    set n to length of body
+    repeat while k is at most n
+        set c to item k of body
+        if c is "\\" and k is less than n and item (k + 1) of body is "|"
+            add "|" to cell
+            set k to k + 2
+        else if c is "|"
+            add markdown_trimmed(join cell with "") to made
+            set cell to empty list
+            add 1 to k
+        else
+            add c to cell
+            add 1 to k
+        end
+    end
+    add markdown_trimmed(join cell with "") to made
+    return made
+end
+
+to markdown_table with lines, i
+    set head to markdown_cells(item i of lines)
+    set aligns to markdown_aligns(item (i + 1) of lines)
+    set rows to empty list
+    set j to i + 2
+    set n to length of lines
+    repeat while j is at most n and not markdown_blank(item j of lines)
+        set line to item j of lines
+        if markdown_indent(line) is less than 4 and (markdown_fence_of(line) is not nothing
+            or markdown_heading_of(line) is not nothing or markdown_is_quote(line) or markdown_is_rule(line))
+            stop
+        end
+        set cells to markdown_cells(line)
+        set row to empty list
+        for each k from 1 to length of aligns
+            if k is at most length of cells
+                add item k of cells to row
+            else
+                add "" to row
+            end
+        end
+        add row to rows
+        add 1 to j
+    end
+    return record with block (record with op "table", head head, aligns aligns, rows rows), next j
+end
+
+# ---------- HTML from the blocks ----------
+
+to markdown_put with out, words
+    if words is ""
+        return
+    end
+    set pieces to out's pieces
+    add words to pieces
+    set out's last to item (length of words) of words
+end
+
+# a new line, unless the HTML so far ends with one, or is empty
+to markdown_new_line with out
+    if out's last is not "\n" and out's last is not ""
+        markdown_put(out, "\n")
+    end
+end
+
+to markdown_render with blocks, state, out, tight
+    for each block in blocks
+        set op to block's op
+        if op is "paragraph"
+            set words to block's before + markdown_inline(block's words, state)
+            if tight
+                markdown_put(out, words)
+            else
+                markdown_new_line(out)
+                markdown_put(out, "<p>" + words + "</p>")
+                markdown_new_line(out)
+            end
+        else if op is "heading"
+            set words to markdown_inline(block's words, state)
+            set id to markdown_id(markdown_plain_text(words), state)
+            set tag to "h" + block's level
+            markdown_new_line(out)
+            if id is ""
+                markdown_put(out, "<" + tag + ">" + words + "</" + tag + ">")
+            else
+                markdown_put(out, "<" + tag + " id=\"" + id + "\">" + words + "</" + tag + ">")
+            end
+            markdown_new_line(out)
+        else if op is "code"
+            set language to ""
+            if block's info is not ""
+                set language to " class=\"language-" + markdown_html_safe(block's info) + "\""
+            end
+            markdown_new_line(out)
+            markdown_put(out, "<pre><code" + language + ">" + markdown_html_safe(block's words) + "</code></pre>")
+            markdown_new_line(out)
+        else if op is "rule"
+            markdown_new_line(out)
+            markdown_put(out, "<hr />")
+            markdown_new_line(out)
+        else if op is "quote"
+            markdown_new_line(out)
+            markdown_put(out, "<blockquote>")
+            markdown_new_line(out)
+            markdown_render(block's inside, state, out, no)
+            markdown_new_line(out)
+            markdown_put(out, "</blockquote>")
+            markdown_new_line(out)
+        else if op is "list"
+            set tag to "ul"
+            set opening to "<ul>"
+            if block's ordered
+                set tag to "ol"
+                set opening to "<ol>"
+                if block's first_number is not 1
+                    set opening to "<ol start=\"" + block's first_number + "\">"
+                end
+            end
+            markdown_new_line(out)
+            markdown_put(out, opening)
+            markdown_new_line(out)
+            for each one in block's items
+                markdown_put(out, "<li>" + one's before)
+                markdown_render(one's blocks, state, out, not block's loose)
+                markdown_put(out, "</li>")
+                markdown_new_line(out)
+            end
+            markdown_put(out, "</" + tag + ">")
+            markdown_new_line(out)
+        else if op is "table"
+            markdown_new_line(out)
+            markdown_put(out, "<table>\n<thead>\n")
+            markdown_row(out, block's head, block's aligns, "th", state)
+            markdown_put(out, "</thead>\n")
+            if length of block's rows is greater than 0
+                markdown_put(out, "<tbody>\n")
+                for each row in block's rows
+                    markdown_row(out, row, block's aligns, "td", state)
+                end
+                markdown_put(out, "</tbody>\n")
+            end
+            markdown_put(out, "</table>")
+            markdown_new_line(out)
+        else if op is "html"
+            markdown_new_line(out)
+            markdown_put(out, block's words)
+            markdown_new_line(out)
+        end
+    end
+end
+
+to markdown_row with out, row, aligns, tag, state
+    markdown_put(out, "<tr>\n")
+    for each k from 1 to length of aligns
+        set align to item k of aligns
+        set opening to "<" + tag + ">"
+        if align is not ""
+            set opening to "<" + tag + " align=\"" + align + "\">"
+        end
+        markdown_put(out, opening + markdown_inline(item k of row, state) + "</" + tag + ">\n")
+    end
+    markdown_put(out, "</tr>\n")
+end
+
+# a heading's id, as GitHub makes them: lower case, spaces as -, and only letters, digits, - and _; a second
+# heading of the same id gets -1 after it, a third -2
+to markdown_id with words, state
+    set made to empty list
+    for each c in lowercase of words
+        if markdown_is_space(c)
+            add "-" to made
+        else if c is "-" or c is "_" or markdown_is_letter(c) or markdown_is_digit(c)
+            add c to made
+        else if length of (c as bytes) is greater than 1
+            add c to made
+        end
+    end
+    set id to join made with ""
+    if id is ""
+        return ""
+    end
+    set ids to state's ids
+    if not (id is in ids)
+        set item id of ids to 0
+        return id
+    end
+    set k to (item id of ids) + 1
+    repeat while (id + "-" + k) is in ids
+        add 1 to k
+    end
+    set item id of ids to k
+    set made_id to id + "-" + k
+    set item made_id of ids to 0
+    return made_id
+end
+
+# ---------- inside a paragraph ----------
+
+# Markdown's marks in a line or paragraph as HTML: first the text, code, links and the runs of * _ and ~,
+# then which runs pair up as emphasis, as CommonMark pairs them
+to markdown_inline with words, state
+    set reading to record with nodes empty list, buffer empty list, trailing 0
+    set n to length of words
+    set k to 1
+    repeat while k is at most n
+        set c to item k of words
+        if c is "\\"
+            if k is less than n and item (k + 1) of words is "\n"
+                markdown_add(reading, "<br />\n")
+                set k to markdown_after_spaces(words, k + 2)
+            else if k is less than n and markdown_is_punctuation(item (k + 1) of words)
+                markdown_add(reading, markdown_html_safe(item (k + 1) of words))
+                set k to k + 2
+            else
+                markdown_add(reading, "\\")
+                add 1 to k
+            end
+        else if c is "`"
+            set size to markdown_run(words, k, "`")
+            set e to markdown_code_end(words, k + size, size)
+            if e is 0
+                markdown_add(reading, markdown_repeated("`", size))
+                set k to k + size
+            else
+                markdown_add(reading, "<code>" + markdown_html_safe(markdown_code_text(markdown_slice(words, k + size,
+                    e - 1))) + "</code>")
+                set k to e + size
+            end
+        else if c is "*" or c is "_" or c is "~"
+            set size to markdown_run(words, k, c)
+            markdown_delimiter(reading, words, k, size)
+            set k to k + size
+        else if c is "[" or (c is "!" and k is less than n and item (k + 1) of words is "[")
+            set image to c is "!"
+            set from to k
+            if image
+                set from to k + 1
+            end
+            set link to nothing
+            if not state's in_link or image
+                set link to markdown_link(words, from, state, image)
+            end
+            if link is nothing
+                markdown_add(reading, c)
+                add 1 to k
+            else
+                markdown_add(reading, link's html)
+                set k to link's next
+            end
+        else if c is "<"
+            set found to markdown_angle(words, k, state)
+            markdown_add(reading, found's html)
+            set k to found's next
+        else if c is "&"
+            set e to markdown_entity_end(words, k)
+            if e is 0
+                markdown_add(reading, "&amp;")
+                add 1 to k
+            else
+                markdown_add(reading, markdown_slice(words, k, e))
+                set k to e + 1
+            end
+        else if c is "\n"
+            markdown_line_break(reading)
+            set k to markdown_after_spaces(words, k + 1)
+        else if c is "h" and not state's in_link and markdown_bare_link_starts(words, k)
+            set e to markdown_bare_link_end(words, k)
+            set address to markdown_slice(words, k, e)
+            markdown_add(reading, "<a href=\"" + markdown_attribute(address) + "\">" + markdown_html_safe(address)
+                + "</a>")
+            set k to e + 1
+        else
+            markdown_add(reading, markdown_html_safe(c))
+            add 1 to k
+        end
+    end
+    markdown_drop_trailing(reading)
+    markdown_flush(reading)
+    set nodes to reading's nodes
+    markdown_emphasis(nodes)
+    return markdown_nodes_text(nodes)
+end
+
+to markdown_add with reading, words
+    set buffer to reading's buffer
+    add words to buffer
+    if words is " "
+        set reading's trailing to reading's trailing + 1
+    else
+        set reading's trailing to 0
+    end
+end
+
+# the text read so far, as a node of its own
+to markdown_flush with reading
+    if length of reading's buffer is greater than 0
+        set nodes to reading's nodes
+        add (record with op "text", words join reading's buffer with "") to nodes
+        set reading's buffer to empty list
+        set reading's trailing to 0
+    end
+end
+
+to markdown_drop_trailing with reading
+    set count to reading's trailing
+    if count is greater than 0
+        set buffer to reading's buffer
+        set reading's buffer to markdown_items(buffer, 1, length of buffer - count)
+        set reading's trailing to 0
+    end
+    return count
+end
+
+# a new line: <br /> after two spaces or more, and the spaces at the line's end left out
+to markdown_line_break with reading
+    if markdown_drop_trailing(reading) is at least 2
+        markdown_add(reading, "<br />\n")
+    else
+        markdown_add(reading, "\n")
+    end
+end
+
+to markdown_after_spaces with words, k
+    set at to k
+    repeat while at is at most length of words and item at of words is " "
+        add 1 to at
+    end
+    return at
+end
+
+# a run of * _ or ~, as a node that may open or close emphasis, by what's on each side of it
+to markdown_delimiter with reading, words, k, size
+    set mark to item k of words
+    set before to " "
+    if k is greater than 1
+        set before to item (k - 1) of words
+    end
+    set after to " "
+    if k + size is at most length of words
+        set after to item (k + size) of words
+    end
+    set space_before to markdown_is_space(before)
+    set space_after to markdown_is_space(after)
+    set mark_before to markdown_is_punctuation(before)
+    set mark_after to markdown_is_punctuation(after)
+    set flanks_left to not space_after and (not mark_after or space_before or mark_before)
+    set flanks_right to not space_before and (not mark_before or space_after or mark_after)
+    set opens to flanks_left
+    set closes to flanks_right
+    if mark is "_"
+        set opens to flanks_left and (not flanks_right or mark_before)
+        set closes to flanks_right and (not flanks_left or mark_after)
+    else if mark is "~" and size is greater than 2
+        set opens to no
+        set closes to no
+    end
+    markdown_flush(reading)
+    set nodes to reading's nodes
+    add (record with op "mark", mark mark, count size, size size, opens opens, closes closes, closings empty list,
+        openings empty list) to nodes
+end
+
+# which runs of marks pair up, from each closing run back to the nearest opening one of its kind
+to markdown_emphasis with nodes
+    set count to length of nodes
+    for each j from 1 to count
+        set closer to item j of nodes
+        if closer's op is "mark" and closer's closes
+            set k to j - 1
+            repeat while closer's count is greater than 0 and k is at least 1
+                set opener to item k of nodes
+                if opener's op is "mark" and opener's opens and opener's count is greater than 0
+                    and opener's mark is closer's mark and markdown_can_pair(opener, closer)
+                    set used to 1
+                    set tag to "em"
+                    if closer's mark is "~"
+                        set used to closer's count
+                        set tag to "del"
+                    else if opener's count is at least 2 and closer's count is at least 2
+                        set used to 2
+                        set tag to "strong"
+                    end
+                    set openings to opener's openings
+                    add "<" + tag + ">" to openings
+                    set closings to closer's closings
+                    add "</" + tag + ">" to closings
+                    set opener's count to opener's count - used
+                    set closer's count to closer's count - used
+                    # the runs between can't pair any more
+                    for each m from k + 1 to j - 1
+                        set between to item m of nodes
+                        if between's op is "mark"
+                            set between's opens to no
+                            set between's closes to no
+                        end
+                    end
+                    if opener's count is 0
+                        set k to k - 1
+                    end
+                else
+                    set k to k - 1
+                end
+            end
+        end
+    end
+end
+
+to markdown_can_pair with opener, closer
+    if closer's mark is "~"
+        return opener's count is closer's count
+    end
+    if opener's closes or closer's opens
+        set sum to opener's size + closer's size
+        if remainder of sum divided by 3 is 0
+            return remainder of opener's size divided by 3 is 0 and remainder of closer's size divided by 3 is 0
+        end
+    end
+    return yes
+end
+
+to markdown_nodes_text with nodes
+    set made to empty list
+    for each node in nodes
+        if node's op is "text"
+            add node's words to made
+        else
+            for each tag in node's closings
+                add tag to made
+            end
+            add markdown_repeated(node's mark, node's count) to made
+            set openings to node's openings
+            set k to length of openings
+            repeat while k is at least 1
+                add item k of openings to made
+                set k to k - 1
+            end
+        end
+    end
+    return join made with ""
+end
+
+# where the run of exactly `size` backticks that ends a code span starts, or 0
+to markdown_code_end with words, from, size
+    set k to from
+    set n to length of words
+    repeat while k is at most n
+        if item k of words is "`"
+            set run to markdown_run(words, k, "`")
+            if run is size
+                return k
+            end
+            set k to k + run
+        else
+            add 1 to k
+        end
+    end
+    return 0
+end
+
+# a code span's text: new lines as spaces, and one space taken off each end if both have one
+to markdown_code_text with words
+    set made to join (split words by "\n") with " "
+    if length of made is at least 3 and item 1 of made is " " and item (length of made) of made is " "
+        and markdown_trimmed(made) is not ""
+        return markdown_slice(made, 2, length of made - 1)
+    end
+    return made
+end
+
+# [words](address "title"), [words][name], [name][] or [name]: the link's HTML and where the text goes on, or
+# nothing; for a picture, ![words](address)
+to markdown_link with words, k, state, image
+    set close to markdown_bracket_end(words, k)
+    if close is 0
+        return nothing
+    end
+    set label to markdown_slice(words, k + 1, close - 1)
+    set n to length of words
+    set address to nothing
+    set title to nothing
+    set next to close + 1
+    if close + 1 is at most n and item (close + 1) of words is "("
+        set found to markdown_destination(words, close + 2)
+        if found is not nothing
+            set address to found's address
+            set title to found's title
+            set next to found's next
+        end
+    end
+    if address is nothing
+        set key to markdown_label_key(label)
+        set next to close + 1
+        if close + 1 is at most n and item (close + 1) of words is "["
+            set close_name to markdown_bracket_end(words, close + 1)
+            if close_name is greater than 0
+                set name to markdown_slice(words, close + 2, close_name - 1)
+                if markdown_trimmed(name) is not ""
+                    set key to markdown_label_key(name)
+                end
+                set next to close_name + 1
+            end
+        end
+        set refs to state's refs
+        if key is "" or not (key is in refs)
+            return nothing
+        end
+        set known to item key of refs
+        set address to known's address
+        set title to known's title
+    end
+    set titled to ""
+    if title is not nothing
+        set titled to " title=\"" + markdown_html_safe(title) + "\""
+    end
+    set was_in_link to state's in_link
+    set state's in_link to yes
+    set inner to markdown_inline(label, state)
+    set state's in_link to was_in_link
+    if image
+        set alt to markdown_plain_text(inner)
+        if markdown_unsafe(address)
+            return record with html markdown_html_safe(alt), next next
+        end
+        return record with html "<img src=\"" + markdown_attribute(address) + "\" alt=\"" + markdown_html_safe(alt)
+            + "\"" + titled + " />", next next
+    end
+    if markdown_unsafe(address)
+        return record with html inner, next next
+    end
+    return record with html "<a href=\"" + markdown_attribute(address) + "\"" + titled + ">" + inner + "</a>",
+        next next
+end
+
+# where the ] that closes the [ at k is, past brackets inside it, code and \ marks; or 0
+to markdown_bracket_end with words, k
+    set depth to 0
+    set j to k
+    set n to length of words
+    repeat while j is at most n
+        set c to item j of words
+        if c is "\\"
+            set j to j + 2
+        else if c is "`"
+            set size to markdown_run(words, j, "`")
+            set e to markdown_code_end(words, j + size, size)
+            if e is 0
+                set j to j + size
+            else
+                set j to e + size
+            end
+        else if c is "["
+            add 1 to depth
+            add 1 to j
+        else if c is "]"
+            set depth to depth - 1
+            if depth is 0
+                return j
+            end
+            add 1 to j
+        else
+            add 1 to j
+        end
+    end
+    return 0
+end
+
+# (address "title"): the address and title, and where the text goes on after the ), or nothing
+to markdown_destination with words, from
+    set n to length of words
+    set j to markdown_after_blank(words, from)
+    if j is greater than n
+        return nothing
+    end
+    set address to ""
+    if item j of words is "<"
+        set e to j + 1
+        repeat while e is at most n and item e of words is not ">" and item e of words is not "\n"
+            add 1 to e
+        end
+        if e is greater than n or item e of words is not ">"
+            return nothing
+        end
+        set address to markdown_slice(words, j + 1, e - 1)
+        set j to e + 1
+    else
+        set depth to 0
+        set begin to j
+        set going to yes
+        repeat while j is at most n and going
+            set c to item j of words
+            if c is "\\" and j is less than n
+                set j to j + 2
+            else if c is " " or c is "\n"
+                set going to no
+            else if c is "("
+                add 1 to depth
+                add 1 to j
+            else if c is ")"
+                if depth is 0
+                    set going to no
+                else
+                    set depth to depth - 1
+                    add 1 to j
+                end
+            else
+                add 1 to j
+            end
+        end
+        set address to markdown_slice(words, begin, j - 1)
+    end
+    set j to markdown_after_blank(words, j)
+    set title to nothing
+    if j is at most n and (item j of words is "\"" or item j of words is "'" or item j of words is "(")
+        set closing to item j of words
+        if closing is "("
+            set closing to ")"
+        end
+        set e to j + 1
+        repeat while e is at most n and item e of words is not closing
+            if item e of words is "\\"
+                add 1 to e
+            end
+            add 1 to e
+        end
+        if e is greater than n
+            return nothing
+        end
+        set title to markdown_unescaped(markdown_slice(words, j + 1, e - 1))
+        set j to markdown_after_blank(words, e + 1)
+    end
+    if j is greater than n or item j of words is not ")"
+        return nothing
+    end
+    return record with address markdown_unescaped(address), title title, next j + 1
+end
+
+to markdown_after_blank with words, k
+    set at to k
+    repeat while at is at most length of words and (item at of words is " " or item at of words is "\n")
+        add 1 to at
+    end
+    return at
+end
+
+# what a < starts: an <address> or <email> link, HTML (trusted), or a < itself
+to markdown_angle with words, k, state
+    set n to length of words
+    set e to k + 1
+    repeat while e is at most n and not (item e of words is ">" or item e of words is "<" or item e of words is " "
+        or item e of words is "\n")
+        add 1 to e
+    end
+    if e is at most n and item e of words is ">" and e is greater than k + 1 and not state's in_link
+        set inside to markdown_slice(words, k + 1, e - 1)
+        if markdown_has_scheme(inside)
+            if markdown_unsafe(inside)
+                return record with html markdown_html_safe(inside), next e + 1
+            end
+            return record with html "<a href=\"" + markdown_attribute(inside) + "\">" + markdown_html_safe(inside)
+                + "</a>", next e + 1
+        end
+        set at to position of "@" in inside
+        if at is greater than 1 and position of "." in markdown_slice(inside, at + 1, length of inside) is greater than 1
+            return record with html "<a href=\"mailto:" + markdown_attribute(inside) + "\">" + markdown_html_safe(
+                inside) + "</a>", next e + 1
+        end
+    end
+    if state's trusted and k is less than n
+        set c to item (k + 1) of words
+        if markdown_is_letter(c) or c is "/" or c is "!" or c is "?"
+            set close to position of ">" in markdown_slice(words, k, n)
+            if markdown_starts_at(words, k, "<!--")
+                set close to position of "-->" in markdown_slice(words, k, n)
+                if close is greater than 0
+                    set close to close + 2
+                end
+            end
+            if close is greater than 0
+                return record with html markdown_slice(words, k, k + close - 1), next k + close
+            end
+        end
+    end
+    return record with html "&lt;", next k + 1
+end
+
+# a scheme such as https: at the start: a letter, then letters, digits, + . or -, 2 to 32 of them, then :
+to markdown_has_scheme with words
+    set at to position of ":" in words
+    if at is less than 3 or at is greater than 33 or not markdown_is_letter(item 1 of words)
+        return no
+    end
+    for each c in markdown_slice(words, 1, at - 1)
+        if not (markdown_is_letter(c) or markdown_is_digit(c) or c is "+" or c is "." or c is "-")
+            return no
+        end
+    end
+    return yes
+end
+
+# an address written out in the text: http:// or https://, after a space, a bracket or the start
+to markdown_bare_link_starts with words, k
+    if k is greater than 1
+        set before to item (k - 1) of words
+        if not (markdown_is_space(before) or before is "(" or before is "*" or before is "_" or before is "~")
+            return no
+        end
+    end
+    for each prefix in list of "https://", "http://"
+        if markdown_starts_at(words, k, prefix) and k + length of prefix is at most length of words
+            and not markdown_is_space(item (k + length of prefix) of words)
+            return yes
+        end
+    end
+    return no
+end
+
+# where the address ends: before a space or <, and before what ends a sentence, or a ) with no ( in it
+to markdown_bare_link_end with words, k
+    set e to k
+    repeat while e + 1 is at most length of words and not markdown_is_space(item (e + 1) of words)
+        and item (e + 1) of words is not "<"
+        add 1 to e
+    end
+    set going to yes
+    repeat while going and e is greater than k
+        set c to item e of words
+        if c is in "?!.,:;*_~'\""
+            set e to e - 1
+        else if c is ")"
+            set address to markdown_slice(words, k, e)
+            if length of (split address by "(") is less than length of (split address by ")")
+                set e to e - 1
+            else
+                set going to no
+            end
+        else
+            set going to no
+        end
+    end
+    return e
+end
+
+# where an &entity; that starts at k ends (at its ;), or 0
+to markdown_entity_end with words, k
+    set n to length of words
+    set j to k + 1
+    if j is at most n and item j of words is "#"
+        add 1 to j
+        set hex to j is at most n and (item j of words is "x" or item j of words is "X")
+        if hex
+            add 1 to j
+        end
+        set from to j
+        repeat while j is at most n and j - from is less than 8 and (markdown_is_digit(item j of words) or (hex
+            and position of (lowercase of item j of words) in "abcdef" is greater than 0))
+            add 1 to j
+        end
+        if j is from
+            return 0
+        end
+    else
+        set from to j
+        repeat while j is at most n and j - from is less than 32 and (markdown_is_letter(item j of words)
+            or markdown_is_digit(item j of words))
+            add 1 to j
+        end
+        if j is from or not markdown_is_letter(item from of words)
+            return 0
+        end
+    end
+    if j is at most n and item j of words is ";"
+        return j
+    end
+    return 0
+end
+
+# ---------- addresses and text ----------
+
+# whether an address could run a script, or read files: javascript:, vbscript:, file:, and data: but pictures
+to markdown_unsafe with address
+    set made to empty list
+    for each c in lowercase of address
+        if byte 1 of (c as bytes) is greater than 32
+            add c to made
+        end
+    end
+    set flat to join made with ""
+    for each scheme in list of "javascript:", "vbscript:", "file:"
+        if markdown_starts_at(flat, 1, scheme)
+            return yes
+        end
+    end
+    if markdown_starts_at(flat, 1, "data:")
+        for each kind_of in list of "data:image/png", "data:image/gif", "data:image/jpeg", "data:image/webp"
+            if markdown_starts_at(flat, 1, kind_of)
+                return no
+            end
+        end
+        return yes
+    end
+    return no
+end
+
+# an address put in an attribute: its spaces as %20, and & < > " written as HTML writes them
+to markdown_attribute with address
+    set made to empty list
+    set k to 1
+    for each c in address
+        if c is " "
+            add "%20" to made
+        else if c is "&"
+            if markdown_entity_end(address, k) is greater than 0
+                add "&" to made
+            else
+                add "&amp;" to made
+            end
+        else if c is "<"
+            add "%3C" to made
+        else if c is ">"
+            add "%3E" to made
+        else if c is "\""
+            add "%22" to made
+        else
+            add c to made
+        end
+        add 1 to k
+    end
+    return join made with ""
+end
+
+to markdown_html_safe with words
+    set made to empty list
+    for each c in "" + words
+        if c is "&"
+            add "&amp;" to made
+        else if c is "<"
+            add "&lt;" to made
+        else if c is ">"
+            add "&gt;" to made
+        else if c is "\""
+            add "&quot;" to made
+        else
+            add c to made
+        end
+    end
+    return join made with ""
+end
+
+# HTML's text alone: its tags left out, and & < > " ' as themselves again
+to markdown_plain_text with html
+    set made to empty list
+    set in_tag to no
+    for each c in html
+        if in_tag
+            if c is ">"
+                set in_tag to no
+            end
+        else if c is "<"
+            set in_tag to yes
+        else
+            add c to made
+        end
+    end
+    set words to join made with ""
+    for each pair in list of (list of "&lt;", "<"), (list of "&gt;", ">"), (list of "&quot;", "\""), (list of "&#39;",
+        "'"), (list of "&amp;", "&")
+        if position of item 1 of pair in words is greater than 0
+            set words to join (split words by item 1 of pair) with item 2 of pair
+        end
+    end
+    return words
+end
+
+# the text with a \ before a mark taken out, as in an address or a title
+to markdown_unescaped with words
+    if position of "\\" in words is 0
+        return words
+    end
+    set made to empty list
+    set n to length of words
+    set k to 1
+    repeat while k is at most n
+        set c to item k of words
+        if c is "\\" and k is less than n and markdown_is_punctuation(item (k + 1) of words)
+            add item (k + 1) of words to made
+            set k to k + 2
+        else
+            add c to made
+            add 1 to k
+        end
+    end
+    return join made with ""
+end
+
+to markdown_starts_at with words, k, start
+    if k + length of start - 1 is greater than length of words
+        return no
+    end
+    return markdown_slice(words, k, k + length of start - 1) is start
+end
+
+to markdown_is_space with c
+    return c is " " or c is "\n" or c is "\t"
+end
+
+to markdown_is_punctuation with c
+    return length of c is 1 and c is in "!\"#$%&'()*+,-./:;<=>?@[\\]^_`\{|}~"
+end
+
+to markdown_is_letter with c
+    return length of c is 1 and c is in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+end
+
+to markdown_is_digit with c
+    return length of c is 1 and c is in "0123456789"
+end
+
+to markdown_blank with line
+    for each c in line
+        if c is not " "
+            return no
+        end
+    end
+    return yes
+end
+
+# how many spaces a line starts with
+to markdown_indent with line
+    set k to 0
+    for each c in line
+        if c is not " "
+            return k
+        end
+        add 1 to k
+    end
+    return k
+end
+
+# the line with up to `size` spaces taken off its start
+to markdown_unindented with line, size
+    set k to 1
+    repeat while k is at most size and k is at most length of line and item k of line is " "
+        add 1 to k
+    end
+    return markdown_slice(line, k, length of line)
+end
+
+# how many of `mark` there are in a row from k
+to markdown_run with words, k, mark
+    set j to k
+    repeat while j is at most length of words and item j of words is mark
+        add 1 to j
+    end
+    return j - k
+end
+
+to markdown_repeated with words, n
+    set made to empty list
+    repeat n times
+        add words to made
+    end
+    return join made with ""
+end
+
+to markdown_slice with words, from, upto
+    if from is greater than upto or from is greater than length of words
+        return ""
+    end
+    return items from to upto of words
+end
+
+to markdown_items with xs, from, upto
+    if from is greater than upto or from is greater than length of xs
+        return empty list
+    end
+    return items from to upto of xs
+end
+
+to markdown_trimmed_start with line
+    return markdown_slice(line, markdown_indent(line) + 1, length of line)
+end
+
+to markdown_trimmed with words
+    set from to 1
+    set upto to length of words
+    repeat while from is at most upto and markdown_is_space(item from of words)
+        add 1 to from
+    end
+    repeat while upto is at least from and markdown_is_space(item upto of words)
+        set upto to upto - 1
+    end
+    return markdown_slice(words, from, upto)
+end
+
+to markdown_cr
+    set one to 1 bytes
+    set byte 1 of one to 13
+    return one as text
+end
