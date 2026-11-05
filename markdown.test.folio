@@ -1,6 +1,6 @@
-# markdown.moth's tests: moth test markdown.test.moth
+# markdown.folio's tests: folio test markdown.test.folio
 
-use "markdown.moth" as md
+use "markdown.folio" as md
 
 to html with words
     return md's to_html(words)

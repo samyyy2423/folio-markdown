@@ -1,11 +1,11 @@
 # markdown
 
-Markdown to HTML for [Moth](https://github.com/samyyy2423/moth), as CommonMark and GitHub write it:
+Markdown to HTML for [Folio](https://github.com/samyyy2423/folio), as CommonMark and GitHub write it:
 headings, paragraphs, emphasis, links and pictures, code, lists (and lists in lists), quotes, tables, task
-lists, rules and line breaks. In Moth alone, so it works everywhere Moth does.
+lists, rules and line breaks. In Folio alone, so it works everywhere Folio does.
 
 ```text
-moth add markdown
+folio add markdown
 ```
 
 ```
@@ -29,13 +29,13 @@ say markdown's to_html("# Notes\n\nSome *very* **useful** `code`.")
 | `headings(words)` | the headings, in order, as records of their `level`, `text` and `id`: a table of contents |
 
 HTML written in the Markdown is shown as text, not put in the page, so what people type can't add scripts
-to it. That makes `to_html` right for a web app that shows what its visitors write, such as Moth's
-[guestbook](https://github.com/samyyy2423/moth/tree/main/apps/guestbook):
+to it. That makes `to_html` right for a web app that shows what its visitors write, such as Folio's
+[guestbook](https://github.com/samyyy2423/folio/tree/main/apps/guestbook):
 
 ```
 use the package "markdown" as markdown
 
-# each message with its *emphasis* and [links](https://example.com), where book.moth has
+# each message with its *emphasis* and [links](https://example.com), where book.folio has
 # "<p>" + html_of(item "message" of entry) + "</p>"
 add "<article>" + markdown's to_html(item "message" of entry) + "</article>" to rows
 ```
@@ -64,9 +64,9 @@ or a `\` at a line's end for a `<br />`, and `&entities;`.
 ## Tests
 
 ```text
-moth test markdown.test.moth
+folio test markdown.test.folio
 ```
 
 ## License
 
-Apache License 2.0, as Moth is: see [LICENSE](LICENSE).
+Apache License 2.0, as Folio is: see [LICENSE](LICENSE).

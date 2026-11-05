@@ -1,5 +1,5 @@
 # Markdown to HTML, as CommonMark and GitHub write it: headings, paragraphs, emphasis, links and pictures,
-# code, lists (and lists in lists), quotes, tables, task lists, rules and line breaks. In Moth alone, so it
+# code, lists (and lists in lists), quotes, tables, task lists, rules and line breaks. In Folio alone, so it
 # works everywhere.
 #
 #   use the package "markdown" as markdown
